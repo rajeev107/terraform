@@ -54,6 +54,7 @@ jobs:
           
   terraform_plan:
       name: 'Terraform Plan Stage'
+      needs: scan
       runs-on: ubuntu-latest
 
       defaults:
