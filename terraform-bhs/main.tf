@@ -62,6 +62,11 @@ resource "azurerm_network_security_group" "nsg" {
   }
 }
 
+resource "azurerm_subnet_network_security_group_association" "nsg_association" {
+  subnet_id                 = azurerm_subnet.subnet.id
+  network_security_group_id = azurerm_network_security_group.nsg.id
+}
+
 resource "azurerm_network_interface" "nic" {
   count               = var.item_count
   name                = "${var.nic_name}-${count.index}"
@@ -83,6 +88,7 @@ resource "azurerm_linux_virtual_machine" "linvm" {
   resource_group_name = azurerm_resource_group.rg.name
   network_interface_ids = [azurerm_network_interface.nic[count.index].id]
   size                = "Standard_DS1_v2"
+  allow_extension_operations=false   #CKV_AZURE_50: "Ensure Virtual Machine Extensions are not Installed"
   admin_username = "rajeev"
   admin_ssh_key {
    username   = "rajeev"
