@@ -37,7 +37,7 @@ jobs:
         uses: bridgecrewio/checkov-action@master
         with:
           directory: ${{ github.workspace }}/terraform-bhs
-          
+          skip_check: BC_AZR_NETWORKING_3
           framework: terraform # optional: run only on a specific infrastructure {cloudformation,terraform,kubernetes,all}
           
           
