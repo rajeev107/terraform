@@ -59,7 +59,7 @@ resource "azurerm_network_security_rule" "ssh" {
   protocol                    = "Tcp"
   resource_group_name         = "azurerm_resource_group.rg.name"
   destination_port_range      = 22
-  source_address_prefix       = "Internet"
+  source_address_prefix       = "any"
 }
 
 
