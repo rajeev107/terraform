@@ -53,7 +53,7 @@ jobs:
      
   terraform_plan:
       name: 'Terraform Plan Stage'
-      needs: Infra-Scanning
+      needs: Checkov-Infra-Scanning
       runs-on: ubuntu-latest
 
       defaults:
