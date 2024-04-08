@@ -19,7 +19,7 @@ env:
 
 jobs:
 # This workflow contains a single job called "scan"
-  scan:
+  Infra-Scanning:
     permissions:
       contents: read # for actions/checkout to fetch code
       security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
@@ -54,7 +54,7 @@ jobs:
      
   terraform_plan:
       name: 'Terraform Plan Stage'
-      needs: scan
+      needs: Infra-Scanning
       runs-on: ubuntu-latest
 
       defaults:
