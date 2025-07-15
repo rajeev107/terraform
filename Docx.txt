@@ -1,0 +1,84 @@
+SAST Integration with Azure DevOps Pipelines — Documentation
+
+1. Overview
+This documentation explains how Fortify SAST scanning is integrated into Azure DevOps pipelines with:
+• Automated scan triggering
+• Controlled queueing via lock files
+• Status monitoring and FPR handling
+• Automatic cleanup on failure or cancellation
+• Safe handling of concurrency with minimal manual effort
+2. Script Explanation — Important Sections
+2.1 scan.bat
+Purpose:
+This script performs the full scan cycle — from queuing to scanning to pushing results.
+Key Components:
+QUEUE_FILE - Each scan creates a uniquely timestamped .queue file. Used to manage scan order.
+LOCKFILE - Contains two values: the queue filename and the scan token. Ensures serialized execution.
+WAIT_FOR_TURN - Waits for the scan to become first in queue before proceeding.
+SCANCENTRAL start - Starts the scan and captures the scan token using string matching.
+RETRIEVE STATUS - Polls status using the token until COMPLETED or FAILED.
+DOWNLOAD FPR - Downloads the .fpr file once scan completes.
+FORTIFYCLIENT uploadFPR - Uploads the result to SSC.
+CLEANUP - Deletes .fpr, lock, and queue file safely after checking existence.
+2.2 cleanup.bat
+Purpose:
+To clean leftover files and cancel scans when pipeline fails or is cancelled.
+Key Components:
+READ LOCKFILE - Extracts token and queue filename from lock file.
+SCAN STATUS CHECK - If scan is RUNNING or QUEUED, issues scancentral cancel command.
+VERIFY CANCEL - Ensures cancellation is successful.
+DELETE FILES - Deletes queue and lock files only if safe paths and valid data.
+3. File & Directory Structure
+$(Build.SourcesDirectory)\
+├── scan.bat
+├── cleanup.bat
+├── $(Build.BuildId)\
+│   ├── scan.lock
+│   └── queue\
+│       └── 20240627121000.queue
+4. Queue and Locking Mechanism
+Fortify SAST scans are resource-intensive. To prevent concurrent execution and manage licensing, a locking mechanism with FIFO queuing is implemented.
+How it works:
+• A timestamped queue file is created for each scan.
+• Scripts check if their queue file is the oldest in the directory.
+• If so, they proceed and create a lock file indicating scan has started.
+• Others wait until it’s their turn.
+• After scan completes, the FPR file is uploaded, and all temporary files are deleted.
+5. Workflow Overview
+1. Scan starts: creates .queue file
+2. Waits until it’s first
+3. If first: creates lock, begins scan
+4. Polls status: if completed, downloads FPR
+5. Uploads to SSC
+6. Deletes all temp files
+6. Handling Multiple Agents
+• Each agent writes its own scan data using unique BuildId directories.
+• Shared queue folder ensures only one scan executes.
+• Queue and lock logic ensures serialized execution even with multiple ADO agents.
+7. Pipeline YAML Snippet
+variables:
+ WORKDIR: '$(Build.SourcesDirectory)\$(Build.BuildId)'
+ LOCKFILE: '$(WORKDIR)\scan.lock'
+ QUEUE_DIR: '$(WORKDIR)\queue'
+
+stages:
+- stage: Start_Scan
+ jobs:
+ - job: RunScan
+   steps:
+   - script: call scan.bat "ProjectX" "1.0"
+     env:
+       SSC_TOKEN: $(FORTIFY_CI_TOKEN)
+       LOCKFILE: $(LOCKFILE)
+       QUEUE_DIR: $(QUEUE_DIR)
+
+- stage: Cleanup_Scan
+ condition: failed() OR canceled()
+ dependsOn: Start_Scan
+ jobs:
+ - job: Cleanup
+   steps:
+   - script: call cleanup.bat
+     env:
+       LOCKFILE: $(LOCKFILE)
+       QUEUE_DIR: $(QUEUE_DIR)
