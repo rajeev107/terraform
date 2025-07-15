@@ -122,3 +122,86 @@ Polls for scan status:
 	•	On success, deletes .fpr, lock, and queue file
 
 
+
+
+Fortify SAST scans are CPU- and memory-intensive and often consume licensing capacity. Running multiple scans concurrently on the same server (especially with multiple agents) can lead to:
+	•	Resource exhaustion
+	•	Scan failures
+	•	Licensing errors
+
+To avoid conflicts, we implemented a synchronized, serialized scan execution mechanism using:
+	•	A lock file to represent an active scan
+	•	A queue file (FIFO) for orderly scan requests
+	•	Logic to allow only one scan to execute at a time
+
+⸻
+
+🔄 Workflow Overview
+	1.	When a scan starts, it creates a timestamp-based .queue file in a defined directory.
+	2.	Each scan checks:
+	•	If it is the oldest .queue file (i.e., first in line)
+	•	If so, it creates a lock file and begins scanning.
+	•	If not, it waits until its turn by polling periodically.
+	3.	Once the scan finishes, the script:
+	•	Deletes the .fpr result file
+	•	Uploads to SSC
+	•	Deletes the .lock and .queue files
+
+⸻
+
+🔧 Implementation Breakdown
+
+📁 Queue File
+	•	Location: $(Build.SourcesDirectory)\$(Build.BuildId)\queue\
+	•	Format: YYYYMMDDHHMMSS.queue
+	•	Purpose: Establishes order based on creation time.
+
+🔐 Lock File
+	•	Location: $(Build.SourcesDirectory)\$(Build.BuildId)\scan.lock
+	•	Contents:
+
+QUEUE=<queue_file_name>
+TOKEN=<scan_token>
+
+Purpose:
+	•	Indicates a scan is in progress
+	•	Holds metadata to cancel the scan if needed (from another pipeline stage)
+
+⸻
+
+🧮 FIFO Logic
+
+In the batch script:
+
+for /f %%F in ('dir /b /o:n "%QUEUE_DIR%\*.queue"') do (
+   set FIRST=%%F
+   goto CHECK_FIRST
+)
+
+This fetches the oldest file in the queue directory.
+	•	The current scan compares its file name (extracted from its queue_file) with the oldest.
+	•	If matched, it proceeds with scanning.
+	•	If not, it waits (e.g., 10 seconds) and checks again.
+
+How It Works with Multiple Agents
+
+Scenario: Multiple Azure DevOps Agents on One Server
+
+Each agent runs in isolation but shares the same disk/queue directory, which means:
+	1.	Each pipeline run (from any agent) creates its own:
+	•	Unique BuildId-scoped directory (e.g., C:\Agent\_work\10\...)
+	•	.queue file within the common queue folder
+	2.	Queue & Lock files are shared:
+	•	All agents check the same queue directory before starting scans
+	•	This ensures only one agent at a time executes the scan
+
+
+What if an Agent/Pipeline Fails or is Cancelled?
+	•	scan.lock contains the token and queue filename
+	•	If the build is canceled, a cleanup script is triggered
+	•	The cleanup script reads the lock file and:
+	•	Cancels the scan (if RUNNING or QUEUED)
+	•	Deletes the .lock and .queue file
+
+
+
