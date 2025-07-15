@@ -1,0 +1,124 @@
+Fortify SAST Integration with Azure DevOps Pipelines — Documentation
+
+⸻
+
+1. ✅ Overview
+
+This documentation explains how Fortify SAST scanning is integrated into Azure DevOps pipelines with:
+	•	Automated scan triggering
+	•	Controlled queueing via lock files
+	•	Status monitoring and FPR handling
+	•	Automatic cleanup on failure or cancellation
+	•	Safe handling of concurrency with minimal manual effort
+3. 🧠 Script Explanation — Important Sections
+
+🔸 3.1 scan.bat
+
+Purpose:
+
+This script performs the full scan cycle — from queuing to scanning to pushing results.
+
+Key Components:
+
+Block
+Description
+QUEUE_FILE
+Each scan creates a uniquely timestamped .queue file. Used to manage scan order.
+LOCKFILE
+Contains two values: the queue filename and the scan token. Ensures serialized execution.
+WAIT_FOR_TURN
+Waits for the scan to become first in queue before proceeding. Uses PowerShell-formatted timestamps for ordering.
+SCANCENTRAL start
+Starts the scan and captures the scan token using string matching.
+RETRIEVE STATUS
+Polls status using the token until COMPLETED or FAILED.
+DOWNLOAD FPR
+Downloads the .fpr file once scan completes.
+FORTIFYCLIENT uploadFPR
+Uploads the result to SSC. Checks for “Background submission succeeded.”
+CLEANUP
+Deletes .fpr, lock, and queue file safely after checking existence.
+
+🔸 3.2 cleanup.bat
+
+Purpose:
+
+To clean leftover files and cancel scans when pipeline fails or is cancelled.
+
+Key Components:
+
+Block
+Description
+READ LOCKFILE
+Extracts token and queue filename from lock file.
+SCAN STATUS CHECK
+If scan is RUNNING or QUEUED, issues scancentral cancel command.
+VERIFY CANCEL
+Ensures cancellation is successful by checking console output for "Successfully canceled job."
+DELETE FILES
+Deletes queue and lock files only if safe paths and valid data.
+
+4. 📂 File & Directory Structure
+
+$(Build.SourcesDirectory)\
+├── scan.bat
+├── cleanup.bat
+├── $(Build.BuildId)\
+│   ├── scan.lock
+│   └── queue\
+│       └── 20240627121000.queue
+
+Each scan’s lock and queue are created in a unique directory using $(Build.BuildId) to avoid interference between parallel builds.
+5. 🔄 Pipeline YAML (Simplified)
+variables:
+  WORKDIR: '$(Build.SourcesDirectory)\$(Build.BuildId)'
+  LOCKFILE: '$(WORKDIR)\scan.lock'
+  QUEUE_DIR: '$(WORKDIR)\queue'
+
+stages:
+- stage: Start_Scan
+  jobs:
+  - job: RunScan
+    steps:
+    - script: call scan.bat "ProjectX" "1.0"
+      env:
+        SSC_TOKEN: $(FORTIFY_CI_TOKEN)
+        LOCKFILE: $(LOCKFILE)
+        QUEUE_DIR: $(QUEUE_DIR)
+
+- stage: Cleanup_Scan
+  condition: failed() OR canceled()
+  dependsOn: Start_Scan
+  jobs:
+  - job: Cleanup
+    steps:
+    - script: call cleanup.bat
+      env:
+        LOCKFILE: $(LOCKFILE)
+        QUEUE_DIR: $(QUEUE_DIR)
+
+
+7. 🔐 Queue Mechanism (for parallel job prevention)
+	•	When script starts, it generates a queue file using timestamp: YYYYMMDDHHMMSS.queue
+	•	Only the job with the lowest timestamp is allowed to proceed
+	•	Others wait and retry every 30 seconds until it’s their turn
+	•	Prevents Fortify resource overload due to multiple concurrent scans
+
+6. 🧹 cleanup.bat Script Highlights
+	•	Reads QUEUE and TOKEN from lock file
+	•	Retrieves scan status using token
+	•	If scan is RUNNING or QUEUED, attempts to cancel:
+
+5. 📜 scan.bat Script Highlights
+	•	Creates a lock file containing:
+	•	QUEUE=20240627093000.queue
+	•	TOKEN=abc-xyz-token
+	•	Starts scan using:
+scancentral -url <controller-url> start -bt none
+Polls for scan status:
+	•	Waits until status is COMPLETED
+	•	Downloads .fpr file
+	•	Uploads .fpr to SSC using fortifyclient
+	•	On success, deletes .fpr, lock, and queue file
+
+
